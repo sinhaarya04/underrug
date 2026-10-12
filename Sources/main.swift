@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let c = RugController(screen: screen)
         controller = c
         c.show()
+        c.startKeyWatch(prompt: true)
         let s = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         s.button?.image = Self.menuIcon()
         s.button?.toolTip = "Underrug"
@@ -72,11 +73,30 @@ func snapshot(_ args: [String]) {
         let t0 = Date(); for _ in 0..<120 { cloth.step(1.0 / 120) }; print("120 steps", Date().timeIntervalSince(t0), "s")
         print("z min", zs.min()!, "max", zs.max()!, "ground max under rug", gs.max()!, "field max", field.data.max()!, "grid", cloth.nx, cloth.ny)
     }
+    if args.contains("--fold") {  // drag a corner far across the rug, like folding it over, then let go
+        let corner = cloth.pos[cloth.nx * cloth.ny - 1]
+        var p = SIMD2(corner.x - 6, corner.y - 6)
+        cloth.grab(at: p)
+        let goal = cloth.centroid + SIMD2(-120, -60)
+        for _ in 0..<240 { p += (goal - p) * 0.03; cloth.moveGrab(to: p); cloth.step(1.0 / 120) }
+        cloth.release()
+        for _ in 0..<360 { cloth.step(1.0 / 120) }
+    }
     if args.contains("--drag") {
         let corner = cloth.pos[cloth.nx * (cloth.ny - 1)]
         var p = SIMD2(corner.x + 10, corner.y - 10)
         cloth.grab(at: p)
         for k in 0..<120 { p += SIMD2(1.6, -0.9) * (k < 90 ? 1 : 0); cloth.moveGrab(to: p); cloth.step(1.0 / 120) }
+    }
+    if args.contains("--firm") {
+        cloth.release()
+        for _ in 0..<60 { cloth.step(1.0 / 120) }
+        let targets = cloth.formTargets(), start = cloth.pos
+        for f in 1...24 { cloth.form(from: start, to: targets, t: Float(f) / 24) }
+        for _ in 0..<300 { cloth.step(1.0 / 120) }
+        var worst: Float = 0
+        for (i, q) in targets.enumerated() { worst = max(worst, simd_length(SIMD2(cloth.pos[i].x, cloth.pos[i].y) - q)) }
+        print("after firm + settle, worst offset", worst)
     }
     let rs = RugScene(size: size)
     rs.setTexture(RugArt.texture(pattern, body: CGSize(width: CGFloat(body.x), height: CGFloat(body.y)), fringe: CGFloat(fringe)), rugSize: total)

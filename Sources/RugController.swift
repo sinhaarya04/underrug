@@ -1,6 +1,7 @@
 import AppKit
 import SceneKit
 import ServiceManagement
+import ApplicationServices
 
 enum RugSize: String, CaseIterable {
     case small, medium, large, cover
@@ -59,6 +60,11 @@ final class RugController: NSObject, NSMenuDelegate {
     private var peeking = false
     private var hovering = false
     private var items: [DesktopItem] = []
+    private var formTargets: [SIMD2<Float>] = []
+    private var formStart: [SIMD3<Float>] = []
+    private var formFrames = 0
+    private var lastSpace: TimeInterval = 0
+    private var keyMonitors: [Any] = []
     private let d = UserDefaults.standard
 
     var pattern: Pattern { get { Pattern(rawValue: d.string(forKey: "pattern") ?? "") ?? .persian } set { d.set(newValue.rawValue, forKey: "pattern") } }
@@ -150,10 +156,17 @@ final class RugController: NSObject, NSMenuDelegate {
 
     private func tick() {
         guard awake, visible else { return }
+        if formFrames > 0 {
+            // ~0.4 s glide into shape, then physics takes over and it drapes onto the lumps again
+            formFrames -= 1
+            cloth.form(from: formStart, to: formTargets, t: 1 - Float(formFrames) / Float(RugController.formLength))
+            rugScene.update(cloth)
+            return
+        }
         cloth.step(1.0 / 120)
         cloth.step(1.0 / 120)
         rugScene.update(cloth)
-        if !cloth.isGrabbing && cloth.motion < 0.02 {
+        if !cloth.isGrabbing && formFrames == 0 && cloth.motion < 0.02 {
             stillFrames += 1
             if stillFrames > 45 {  // settled: stop simulating and redrawing until something changes
                 awake = false
@@ -199,6 +212,47 @@ final class RugController: NSObject, NSMenuDelegate {
     func spin(_ a: Float) { guard !cloth.isGrabbing else { return }; cloth.rotate(by: a); wake() }
     func shake() { cloth.shake(); wake() }
 
+    /// Double-tap Space: the rug firms up and settles back into a neat rectangle where it lies.
+    func firm() {
+        guard visible, !cloth.isGrabbing else { return }
+        formTargets = cloth.formTargets()
+        formStart = cloth.pos
+        formFrames = RugController.formLength
+        wake()
+    }
+
+    static let formLength = 24
+
+    func startKeyWatch(prompt: Bool) {
+        keyMonitors.forEach { NSEvent.removeMonitor($0) }
+        keyMonitors = []
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)  // global key events need Accessibility; without it only the menu works
+        let handle: (NSEvent) -> Void = { [weak self] e in self?.key(e) }
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: handle) { keyMonitors.append(g) }
+        if let l = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { handle($0); return $0 }) { keyMonitors.append(l) }
+    }
+
+    private func key(_ e: NSEvent) {
+        guard e.keyCode == 49, e.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty, !e.isARepeat else {
+            lastSpace = 0
+            return
+        }
+        // Only when you're on the desktop with the pointer over the rug, so typing two spaces elsewhere never fires it.
+        let onDesktop = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder"
+            || NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        let m = NSEvent.mouseLocation
+        let over = cloth.contains(SIMD2(Float(m.x - screen.frame.minX), Float(m.y - screen.frame.minY)))
+        guard onDesktop, over else { lastSpace = 0; return }
+        let now = e.timestamp
+        if lastSpace > 0, now - lastSpace < 0.4 {
+            lastSpace = 0
+            firm()
+        } else {
+            lastSpace = now
+        }
+    }
+
     // MARK: menu
 
     func menu() -> NSMenu {
@@ -233,12 +287,18 @@ final class RugController: NSObject, NSMenuDelegate {
         let fi = NSMenuItem(title: "Fabric", action: nil, keyEquivalent: ""); fi.submenu = fl; m.addItem(fi)
         m.addItem(item("Shake It Out", #selector(shakeAction)))
         m.addItem(item("Straighten", #selector(straighten)))
+        m.addItem(item("Firm Up  (double-tap Space)", #selector(firmAction)))
+        if !AXIsProcessTrusted() {
+            let w = NSMenuItem(title: "Allow Accessibility so double-Space works…", action: #selector(askAccessibility), keyEquivalent: "")
+            w.target = self
+            m.addItem(w)
+        }
         m.addItem(.separator())
         let n = Sweeper.candidates().count
         m.addItem(item(n > 0 ? "Sweep \(n) Item\(n == 1 ? "" : "s") Under the Rug…" : "Desktop Is Already Clean", n > 0 ? #selector(sweep) : nil))
         if Sweeper.canUnsweep { m.addItem(item("Unsweep Last Sweep", #selector(unsweep))) }
         m.addItem(.separator())
-        let tip = NSMenuItem(title: "Drag to move · scroll to rotate · double-click to shake · hold ⌥ to peek", action: nil, keyEquivalent: "")
+        let tip = NSMenuItem(title: "Drag to move · scroll to rotate · double-click to shake · double-Space to firm · hold ⌥ to peek", action: nil, keyEquivalent: "")
         tip.isEnabled = false
         m.addItem(tip)
         if !scanner.usingFinder {
@@ -284,6 +344,11 @@ final class RugController: NSObject, NSMenuDelegate {
     }
 
     @objc private func shakeAction() { shake() }
+    @objc private func firmAction() { firm() }
+    @objc private func askAccessibility() {
+        startKeyWatch(prompt: true)
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    }
     @objc private func straighten() { buildRug(drop: true, center: cloth.centroid, angle: 0) }
 
     @objc private func sweep() {

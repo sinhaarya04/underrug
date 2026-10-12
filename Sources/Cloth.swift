@@ -173,10 +173,75 @@ final class Cloth {
                 }
             }
         }
-        for _ in 0..<iterations {
+        for k in 0..<iterations {
             solveConstraints()
             applyGrab()
             collide()
+            if k == iterations / 2 { selfCollide() }
+        }
+        selfCollide()
+        collide()
+    }
+
+    // MARK: self-collision
+
+    private var hashHeads = [Int32]()
+    private var hashNext = [Int32]()
+    private let thickness: Float = 4
+
+    /// Keep folded layers stacked instead of passing through each other. Particles from parts of the
+    /// rug that are far apart in the weave but close in space are pushed apart vertically; the one
+    /// that was already higher stays on top, so a fold always lies over the rug, never inside it.
+    private func selfCollide() {
+        let n = pos.count
+        let cell = max(size.x / Float(nx - 1), 4) * 1.5
+        let r = cell * 1.45, r2 = r * r
+        let gw = Int(bounds.x / cell) + 2, gh = Int(bounds.y / cell) + 2
+        if hashHeads.count != gw * gh { hashHeads = [Int32](repeating: -1, count: gw * gh) } else {
+            for i in hashHeads.indices { hashHeads[i] = -1 }
+        }
+        if hashNext.count != n { hashNext = [Int32](repeating: -1, count: n) }
+        let P = pos.withUnsafeMutableBufferPointer { $0.baseAddress! }
+        let Q = prev.withUnsafeBufferPointer { $0.baseAddress! }
+        for i in 0..<n {
+            let cx = min(max(Int(P[i].x / cell), 0), gw - 1), cy = min(max(Int(P[i].y / cell), 0), gh - 1)
+            let h = cy * gw + cx
+            hashNext[i] = hashHeads[h]
+            hashHeads[h] = Int32(i)
+        }
+        for i in 0..<n {
+            let pi = P[i]
+            let ii = i % nx, ij = i / nx
+            let cx = min(max(Int(pi.x / cell), 0), gw - 1), cy = min(max(Int(pi.y / cell), 0), gh - 1)
+            for dy in -1...1 {
+                let yy = cy + dy
+                if yy < 0 || yy >= gh { continue }
+                for dx in -1...1 {
+                    let xx = cx + dx
+                    if xx < 0 || xx >= gw { continue }
+                    var j = Int(hashHeads[yy * gw + xx])
+                    while j >= 0 {
+                        defer { j = Int(hashNext[j]) }
+                        if j <= i { continue }
+                        // neighbours in the weave are held by constraints already
+                        let ji = j % nx, jj = j / nx
+                        if abs(ji - ii) <= 3 && abs(jj - ij) <= 3 { continue }
+                        let pj = P[j]
+                        let dxy = SIMD2(pj.x - pi.x, pj.y - pi.y)
+                        if simd_length_squared(dxy) >= r2 { continue }
+                        let dz = pj.z - pi.z
+                        if abs(dz) >= thickness { continue }
+                        // who belongs on top: the higher one, judged by last frame to stay consistent
+                        let jOnTop = (Q[j].z + pj.z) >= (Q[i].z + pi.z)
+                        let push = (thickness - abs(dz)) * 0.5
+                        if jOnTop {
+                            P[j].z += push; P[i].z -= push
+                        } else {
+                            P[i].z += push; P[j].z -= push
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -283,6 +348,37 @@ final class Cloth {
                 let up = 7 * sin(Float.pi * u) * (0.6 + 0.4 * sin(Float.pi * v)) + 3 * sin(u * 3 * .pi)
                 prev[k].z = pos[k].z - up
             }
+        }
+    }
+
+    /// Where every particle would sit if the rug lay perfectly flat and square at its current spot.
+    func formTargets() -> [SIMD2<Float>] {
+        let c = centroid, a = angle
+        let cs = cos(a), sn = sin(a)
+        let sx = size.x / Float(nx - 1), sy = size.y / Float(ny - 1)
+        var out = [SIMD2<Float>]()
+        out.reserveCapacity(pos.count)
+        for j in 0..<ny {
+            for i in 0..<nx {
+                let lx = Float(i) * sx - size.x / 2, ly = Float(j) * sy - size.y / 2
+                out.append(SIMD2(c.x + lx * cs - ly * sn, c.y + lx * sn + ly * cs))
+            }
+        }
+        return out
+    }
+
+    /// Firm up, frame t in 0...1: glide every particle from `start` to its flat spot, arcing up a little
+    /// mid-way (a fold can only open by lifting). Velocities are zeroed so it lands softly.
+    func form(from start: [SIMD3<Float>], to targets: [SIMD2<Float>], t: Float) {
+        guard start.count == pos.count, targets.count == pos.count else { return }
+        let e = t * t * (3 - 2 * t)
+        let arc = sin(t * .pi) * 18
+        for i in pos.indices {
+            let s = start[i]
+            let xy = SIMD2(s.x, s.y) + (targets[i] - SIMD2(s.x, s.y)) * e
+            let z = max(ground.sample(xy.x, xy.y) + 0.5, s.z * (1 - e) + arc + 2 * e)
+            pos[i] = SIMD3(xy.x, xy.y, z)
+            prev[i] = pos[i]
         }
     }
 
