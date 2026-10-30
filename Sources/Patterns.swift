@@ -250,33 +250,6 @@ enum RugArt {
         fill(c, CGRect(x: r.maxX - 4, y: r.minY, width: 4, height: r.height), rgb(0.90, 0.85, 0.74))
     }
 
-    /// Tiling normal map with a fine basket weave.
-    static func weaveNormalMap() -> CGImage? {
-        let n = 128
-        var px = [UInt8](repeating: 0, count: n * n * 4)
-        func h(_ x: Double, _ y: Double) -> Double {
-            let cell = 8.0
-            let u = (x / cell).truncatingRemainder(dividingBy: 2), v = (y / cell).truncatingRemainder(dividingBy: 2)
-            let horizontal = (u < 1) == (v < 1)
-            let t = horizontal ? sin(.pi * (y.truncatingRemainder(dividingBy: cell)) / cell) : sin(.pi * (x.truncatingRemainder(dividingBy: cell)) / cell)
-            return t
-        }
-        for y in 0..<n {
-            for x in 0..<n {
-                let dx = h(Double(x + 1), Double(y)) - h(Double(x - 1 + n), Double(y))
-                let dy = h(Double(x), Double(y + 1)) - h(Double(x), Double(y - 1 + n))
-                var v = SIMD3<Double>(-dx * 0.9, -dy * 0.9, 1)
-                v /= (v * v).sum().squareRoot()
-                let i = (y * n + x) * 4
-                px[i] = UInt8((v.x * 0.5 + 0.5) * 255); px[i + 1] = UInt8((v.y * 0.5 + 0.5) * 255); px[i + 2] = UInt8((v.z * 0.5 + 0.5) * 255); px[i + 3] = 255
-            }
-        }
-        let data = CFDataCreate(nil, px, px.count)!
-        return CGImage(width: n, height: n, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: n * 4,
-                       space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                       provider: CGDataProvider(data: data)!, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-    }
-
     // MARK: drawing helpers
 
     static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> CGColor { CGColor(red: r, green: g, blue: b, alpha: a) }

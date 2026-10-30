@@ -1,17 +1,15 @@
 # Underrug
 
-A rug for your Mac desktop. It lies over your icons, drapes into soft lumps wherever files sit underneath, and moves like real cloth when you drag it.
+A rug for your Mac desktop. Sweep your mess under it.
 
-- **Drag** to move it, **scroll** over it to rotate, **double-click** to shake it out.
-- **Double-tap Space** (pointer over the rug, on the desktop) to firm it up: it pulls taut, folds and wrinkles smooth out, and it settles back into shape. This needs Accessibility permission, since the rug never takes keyboard focus.
-- Folds stack on top of the rug instead of passing through it (self-collision).
+- **Drag** the rug to move it. **Drag an edge** to peel it back and peek at what's underneath; let go and it falls flat again.
+- **Drag a corner dot** to rotate it (or scroll over it).
+- The **Design** pill under the rug flips through the patterns: Persian, Kilim, Beni Ourain, Picnic Gingham, Sunset Stripes, or weave in your own image.
 - **Hold ⌥** to see through it and click the files underneath.
-- **Rug designs:** Persian, Kilim, Beni Ourain, Picnic Gingham, Sunset Stripes, or weave in your own image.
-- **Size** (small to covering the whole desktop) and **fabric** (heavy wool, cotton, silk) change how it drapes.
-- **Sweep Under the Rug** moves the desktop clutter into `~/Desktop/Under the Rug/<date>`. That folder sits under the rug as one lump that grows with what you've swept. **Unsweep** puts everything back.
-- The physics sleeps once the rug settles, so it idles under 1% CPU.
+- **Sweep Under the Rug** has Finder pile every desktop icon beneath the rug. Only icon positions change, never the files, and **Put the Icons Back** returns each one to where it was. If Finder's *Sort By* or *Use Stacks* is on, Finder keeps its own order; Underrug says so instead of pretending.
+- **Size** goes from small to covering the whole desktop.
 
-Everything is in the menu bar icon, or right-click the rug.
+Everything else is in the menu bar icon, or right-click the rug.
 
 ## Build
 
@@ -20,6 +18,14 @@ Everything is in the menu bar icon, or right-click the rug.
 open build/Underrug.app
 ```
 
-On first launch macOS asks to let Underrug control Finder. Finder is where it reads your icon positions; without access it guesses a default grid.
+The first sweep asks to let Underrug control Finder, which is how it moves icons.
 
-`build/Underrug.app/Contents/MacOS/Underrug --snapshot out.png [--drag] [--pattern kilim]` renders a frame offline against your real desktop layout.
+`build/Underrug.app/Contents/MacOS/Underrug --snapshot out.png [--controls] [--fold] [--peek] [--swept] [--pattern kilim]` renders a frame offline over a stand-in desktop.
+
+## Layout
+
+- `Geometry.swift`: where the rug lies, and the fold a peel makes
+- `Renderer.swift`: draws the rug, the turned-back flap and the controls (Core Graphics)
+- `RugController.swift`: the overlay window, gestures, ⌥ peek and the menu
+- `Patterns.swift`: the procedural rug textures
+- `Desktop.swift`, `Sweeper.swift`: Finder icon positions, sweep and unsweep

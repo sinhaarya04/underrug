@@ -1,5 +1,4 @@
 import AppKit
-import SceneKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var controller: RugController?
@@ -10,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let c = RugController(screen: screen)
         controller = c
         c.show()
-        c.startKeyWatch(prompt: true)
         let s = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         s.button?.image = Self.menuIcon()
         s.button?.toolTip = "Underrug"
@@ -20,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// A tiny rug with fringe, drawn as a template image for the menu bar.
     static func menuIcon() -> NSImage {
-        let img = NSImage(size: NSSize(width: 20, height: 14), flipped: false) { r in
+        let img = NSImage(size: NSSize(width: 20, height: 14), flipped: false) { _ in
             NSColor.black.setStroke()
             NSColor.black.setFill()
             let body = NSRect(x: 4, y: 2, width: 12, height: 10)
@@ -40,85 +38,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: offline renders for previews, testing and the app icon
 
 func writePNG(_ img: NSImage, _ path: String) {
-    guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { return }
+    guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+          let png = rep.representation(using: .png, properties: [:]) else { return }
     try? png.write(to: URL(fileURLWithPath: path))
 }
 
-/// --snapshot out.png [--drag] [--pattern kilim]: simulate on the real desktop layout and render one frame.
+/// --snapshot out.png [--pattern kilim] [--fold] [--controls] [--peek] [--swept]:
+/// render one frame over a stand-in desktop (wood floor, a handful of icons).
 func snapshot(_ args: [String]) {
     let out = args.first { $0.hasSuffix(".png") } ?? "underrug.png"
-    let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
-    if let i = args.firstIndex(of: "--pattern"), i + 1 < args.count { UserDefaults.standard.set(args[i + 1], forKey: "pattern") }
-    let field = Heightfield(width: Float(size.width), height: Float(size.height))
-    let items = DesktopScanner.finderItems(screenHeight: size.height) ?? DesktopScanner.fallbackItems(screenHeight: size.height)
-    DesktopScanner.stampLumps(items, into: field)
-    let cloth = Cloth(ground: field, bounds: SIMD2(Float(size.width), Float(size.height)))
-    let pattern = Pattern(rawValue: UserDefaults.standard.string(forKey: "pattern") ?? "") ?? .persian
-    let body = SIMD2<Float>(620, 400), fringe: Float = 26
-    let total = SIMD2(body.x + 2 * fringe, body.y)
-    // put the rug over the busiest part of the desktop so the lumps show
-    var c = SIMD2<Float>(Float(size.width) * 0.62, Float(size.height) * 0.52)
-    if !items.isEmpty {
-        let xs = items.map { Float($0.center.x) }.sorted(), ys = items.map { Float($0.center.y) }.sorted()
-        c = SIMD2(xs[xs.count / 2], ys[ys.count / 2])
-        c = simd_clamp(c, total * 0.5, SIMD2(Float(size.width), Float(size.height)) - total * 0.5)
+    let size = CGSize(width: 1512, height: 982)
+    let name = args.firstIndex(of: "--pattern").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+    let pattern = Pattern(rawValue: name ?? "") ?? .persian
+    let body = CGSize(width: 620, height: 400), fringe: CGFloat = 26
+    let rug = Placement(center: CGPoint(x: size.width * 0.48, y: size.height * 0.52), angle: -0.06,
+                        size: CGSize(width: body.width + 2 * fringe, height: body.height), fringe: fringe)
+
+    var frame = RugFrame(placement: rug, texture: RugArt.texture(pattern, body: body, fringe: fringe))
+    if args.contains("--fold") {  // the bottom-right corner turned back toward the middle
+        let c = CGPoint(x: rug.body.maxX, y: rug.body.minY)
+        frame.fold = Fold(from: c, to: CGPoint(x: c.x - 300, y: c.y + 170))
     }
-    cloth.build(center: c, size: total, angle: -0.07, dropHeight: 70)
-    cloth.setBend(0.45)
-    for _ in 0..<360 { cloth.step(1.0 / 120) }
-    if ProcessInfo.processInfo.environment["UNDERRUG_DEBUG"] != nil {
-        let zs = cloth.pos.map { $0.z }
-        let gs = cloth.pos.map { field.sample($0.x, $0.y) }
-        for k in 0..<6 { for _ in 0..<120 { cloth.step(1.0 / 120) }; print("after", 360 + (k + 1) * 120, "steps motion", cloth.motion) }
-        let t0 = Date(); for _ in 0..<120 { cloth.step(1.0 / 120) }; print("120 steps", Date().timeIntervalSince(t0), "s")
-        print("z min", zs.min()!, "max", zs.max()!, "ground max under rug", gs.max()!, "field max", field.data.max()!, "grid", cloth.nx, cloth.ny)
+    if args.contains("--controls") {
+        frame.controls = true
+        frame.rotateTip = rug.corners[1]
     }
-    if args.contains("--fold") {  // drag a corner far across the rug, like folding it over, then let go
-        let corner = cloth.pos[cloth.nx * cloth.ny - 1]
-        var p = SIMD2(corner.x - 6, corner.y - 6)
-        cloth.grab(at: p)
-        let goal = cloth.centroid + SIMD2(-120, -60)
-        for _ in 0..<240 { p += (goal - p) * 0.03; cloth.moveGrab(to: p); cloth.step(1.0 / 120) }
-        cloth.release()
-        for _ in 0..<360 { cloth.step(1.0 / 120) }
-    }
-    if args.contains("--drag") {
-        let corner = cloth.pos[cloth.nx * (cloth.ny - 1)]
-        var p = SIMD2(corner.x + 10, corner.y - 10)
-        cloth.grab(at: p)
-        for k in 0..<120 { p += SIMD2(1.6, -0.9) * (k < 90 ? 1 : 0); cloth.moveGrab(to: p); cloth.step(1.0 / 120) }
-    }
-    if args.contains("--firm") {
-        cloth.release()
-        for _ in 0..<60 { cloth.step(1.0 / 120) }
-        let targets = cloth.formTargets(), start = cloth.pos
-        for f in 1...24 { cloth.form(from: start, to: targets, t: Float(f) / 24) }
-        for _ in 0..<300 { cloth.step(1.0 / 120) }
-        var worst: Float = 0
-        for (i, q) in targets.enumerated() { worst = max(worst, simd_length(SIMD2(cloth.pos[i].x, cloth.pos[i].y) - q)) }
-        print("after firm + settle, worst offset", worst)
-    }
-    let rs = RugScene(size: size)
-    rs.setTexture(RugArt.texture(pattern, body: CGSize(width: CGFloat(body.x), height: CGFloat(body.y)), fringe: CGFloat(fringe)), rugSize: total)
-    rs.update(cloth)
-    let r = SCNRenderer(device: MTLCreateSystemDefaultDevice(), options: nil)
-    r.scene = rs.scene
-    r.pointOfView = rs.camera
-    let rug = r.snapshot(atTime: 0, with: size, antialiasingMode: .multisampling4X)
-    // composite over a stand-in desktop: wallpaper gradient plus a dot per icon, to check alignment
-    let final = NSImage(size: size, flipped: false) { rect in
-        NSGradient(colors: [NSColor(calibratedRed: 0.20, green: 0.30, blue: 0.45, alpha: 1), NSColor(calibratedRed: 0.42, green: 0.32, blue: 0.48, alpha: 1)])!.draw(in: rect, angle: 70)
-        for it in items {
-            NSColor(white: 1, alpha: 0.55).setFill()
-            NSBezierPath(roundedRect: NSRect(x: it.center.x - 22, y: it.center.y - 22, width: 44, height: 44), xRadius: 8, yRadius: 8).fill()
-            NSColor(white: 1, alpha: 0.3).setFill()
-            NSBezierPath(roundedRect: NSRect(x: it.center.x - 30, y: it.center.y - 50, width: 60, height: 10), xRadius: 3, yRadius: 3).fill()
-        }
-        rug.draw(in: rect)
+    if args.contains("--peek") { frame.opacity = 0.12; frame.optionBadge = true }
+
+    var rng = SeededRNG(seed: 3)
+    let icons = args.contains("--swept") || args.contains("--fold") || args.contains("--peek")
+        ? Sweeper.pile(14, under: rug)
+        : (0..<14).map { k in CGPoint(x: size.width - 70 - CGFloat(k / 7) * 100, y: size.height - 90 - CGFloat(k % 7) * 110) }
+
+    let img = NSImage(size: size, flipped: false) { rect in
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+        woodFloor(ctx, rect, &rng)
+        for c in icons { fakeIcon(ctx, c) }
+        Renderer.draw(frame, in: ctx, bounds: rect)
         return true
     }
-    writePNG(final, out)
-    print("wrote \(out) with \(items.count) desktop items")
+    writePNG(img, out)
+    print("wrote \(out)")
+}
+
+private func woodFloor(_ ctx: CGContext, _ r: CGRect, _ rng: inout SeededRNG) {
+    let rowH: CGFloat = 46
+    var y = r.minY
+    while y < r.maxY {
+        var x = r.minX - CGFloat.random(in: 0...300, using: &rng)
+        while x < r.maxX {
+            let w = CGFloat.random(in: 220...460, using: &rng), t = CGFloat.random(in: 0...1, using: &rng)
+            ctx.setFillColor(CGColor(red: 0.84 + 0.06 * t, green: 0.70 + 0.06 * t, blue: 0.52 + 0.05 * t, alpha: 1))
+            ctx.fill(CGRect(x: x, y: y, width: w, height: rowH))
+            ctx.setFillColor(CGColor(gray: 0, alpha: 0.12))
+            ctx.fill(CGRect(x: x, y: y, width: 1.5, height: rowH))
+            x += w
+        }
+        ctx.fill(CGRect(x: r.minX, y: y, width: r.width, height: 1.5))
+        y += rowH
+    }
+}
+
+private func fakeIcon(_ ctx: CGContext, _ c: CGPoint) {
+    ctx.setFillColor(CGColor(gray: 1, alpha: 0.95))
+    ctx.addPath(CGPath(roundedRect: CGRect(x: c.x - 20, y: c.y - 14, width: 40, height: 50), cornerWidth: 4, cornerHeight: 4, transform: nil))
+    ctx.fillPath()
+    ctx.setFillColor(CGColor(red: 0.15, green: 0.42, blue: 0.95, alpha: 1))
+    ctx.addPath(CGPath(roundedRect: CGRect(x: c.x - 34, y: c.y - 34, width: 68, height: 15), cornerWidth: 4, cornerHeight: 4, transform: nil))
+    ctx.fillPath()
 }
 
 /// --icon dir: render AppIcon.iconset PNGs.

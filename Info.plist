@@ -13,6 +13,6 @@
 	<key>LSMinimumSystemVersion</key><string>13.0</string>
 	<key>LSUIElement</key><true/>
 	<key>NSHighResolutionCapable</key><true/>
-	<key>NSAppleEventsUsageDescription</key><string>Underrug asks Finder where your desktop icons are so the rug can drape over them, and to tuck the “Under the Rug” folder beneath it.</string>
+	<key>NSAppleEventsUsageDescription</key><string>Underrug asks Finder to move your desktop icons under the rug when you sweep, and to put them back when you unsweep.</string>
 </dict>
 </plist>

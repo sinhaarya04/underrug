@@ -1,75 +1,74 @@
 import AppKit
-import SceneKit
 import ServiceManagement
-import ApplicationServices
 
 enum RugSize: String, CaseIterable {
     case small, medium, large, cover
     var title: String { ["small": "Small", "medium": "Medium", "large": "Large", "cover": "Cover the Desktop"][rawValue]! }
-    func points(for screen: CGSize) -> SIMD2<Float> {
+    /// The woven part; the fringe is added on the short ends.
+    func body(for screen: CGSize) -> CGSize {
         switch self {
-        case .small: return SIMD2(420, 270)
-        case .medium: return SIMD2(620, 400)
-        case .large: return SIMD2(860, 540)
-        case .cover: return SIMD2(Float(screen.width) * 0.86, Float(screen.height) * 0.80)
+        case .small: return CGSize(width: 420, height: 270)
+        case .medium: return CGSize(width: 620, height: 400)
+        case .large: return CGSize(width: 860, height: 540)
+        case .cover: return CGSize(width: screen.width * 0.86, height: screen.height * 0.80)
         }
     }
 }
 
-enum Feel: String, CaseIterable {
-    case heavy, normal, silky
-    var title: String { ["heavy": "Heavy Wool", "normal": "Cotton", "silky": "Silk"][rawValue]! }
-    var friction: Float { [0.58, 0.42, 0.16][Feel.allCases.firstIndex(of: self)!] }
-    var bend: Float { [0.6, 0.45, 0.2][Feel.allCases.firstIndex(of: self)!] }
-    var damping: Float { [0.98, 0.985, 0.992][Feel.allCases.firstIndex(of: self)!] }
-}
-
 /// The window floats just above the desktop icons and below every app window. It only takes the
-/// mouse while the pointer is over the rug, so the rest of the desktop still works.
+/// mouse while the pointer is over the rug or its controls, so the rest of the desktop still works.
 final class RugPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 
-final class RugView: SCNView {
+final class RugView: NSView {
     weak var controller: RugController?
+    var rugFrame: RugFrame? { didSet { needsDisplay = true } }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    private func pt(_ e: NSEvent) -> SIMD2<Float> { let p = convert(e.locationInWindow, from: nil); return SIMD2(Float(p.x), Float(p.y)) }
-    override func mouseDown(with e: NSEvent) {
-        if e.clickCount == 2 { controller?.shake(); return }
-        controller?.grab(pt(e))
+    override func draw(_ dirty: NSRect) {
+        guard let f = rugFrame, let ctx = NSGraphicsContext.current?.cgContext else { return }
+        Renderer.draw(f, in: ctx, bounds: bounds)
     }
+    private func pt(_ e: NSEvent) -> CGPoint { convert(e.locationInWindow, from: nil) }
+    override func mouseDown(with e: NSEvent) { controller?.press(pt(e), e) }
     override func mouseDragged(with e: NSEvent) { controller?.drag(pt(e)) }
-    override func mouseUp(with e: NSEvent) { controller?.drop() }
-    override func scrollWheel(with e: NSEvent) { controller?.spin(Float(e.scrollingDeltaY) * (e.hasPreciseScrollingDeltas ? 0.004 : 0.04)) }
+    override func mouseUp(with e: NSEvent) { controller?.release() }
+    override func scrollWheel(with e: NSEvent) { controller?.spin(e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 0.004 : 0.04)) }
     override func rightMouseDown(with e: NSEvent) { if let m = controller?.menu() { NSMenu.popUpContextMenu(m, with: e, for: self) } }
 }
 
 final class RugController: NSObject, NSMenuDelegate {
+    private enum Gesture {
+        case move(offset: CGVector)
+        case rotate(angle: CGFloat, bearing: CGFloat)
+        case peel
+    }
+
+    /// Grabbing this close to the woven edge (or anywhere on the fringe) peels instead of moving.
+    private static let peelBand: CGFloat = 34
+
     let screen: NSScreen
     let window: RugPanel
     let view: RugView
-    let field: Heightfield
-    let cloth: Cloth
-    let rugScene: RugScene
-    let scanner: DesktopScanner
-    private var stepTimer: Timer?
-    private var pollTimer: Timer?
-    private var stillFrames = 0
-    private var awake = true
+    private var placement: Placement
+    private var texture: CGImage?
+    private var fold: Fold?
+    private var unfolding: (from: CGPoint, start: TimeInterval)?
+    private var gesture: Gesture?
+    private var opacity: CGFloat = 1
     private var peeking = false
-    private var hovering = false
-    private var items: [DesktopItem] = []
-    private var formTargets: [SIMD2<Float>] = []
-    private var formStart: [SIMD3<Float>] = []
-    private var formFrames = 0
-    private var lastSpace: TimeInterval = 0
-    private var keyMonitors: [Any] = []
+    private var lastOver: TimeInterval = 0
+    private var cursor: NSCursor?
+    private var chrome: (controls: Bool, tip: CGPoint?) = (false, nil)
+    private var animator: Timer?
+    private var poller: Timer?
+    private var sweeping = false
     private let d = UserDefaults.standard
 
     var pattern: Pattern { get { Pattern(rawValue: d.string(forKey: "pattern") ?? "") ?? .persian } set { d.set(newValue.rawValue, forKey: "pattern") } }
     var rugSize: RugSize { get { RugSize(rawValue: d.string(forKey: "size") ?? "") ?? .medium } set { d.set(newValue.rawValue, forKey: "size") } }
-    var feel: Feel { get { Feel(rawValue: d.string(forKey: "feel") ?? "") ?? .normal } set { d.set(newValue.rawValue, forKey: "feel") } }
     var visible: Bool { get { d.object(forKey: "visible") as? Bool ?? true } set { d.set(newValue, forKey: "visible") } }
 
     init(screen: NSScreen) {
@@ -86,171 +85,176 @@ final class RugController: NSObject, NSMenuDelegate {
         window.hidesOnDeactivate = false
 
         view = RugView(frame: NSRect(origin: .zero, size: f.size))
-        view.backgroundColor = .clear
-        view.antialiasingMode = .multisampling4X
-        view.preferredFramesPerSecond = 60
         view.wantsLayer = true
-        view.layer?.isOpaque = false
+        view.layerContentsRedrawPolicy = .onSetNeedsDisplay
         window.contentView = view
 
-        field = Heightfield(width: Float(f.width), height: Float(f.height))
-        cloth = Cloth(ground: field, bounds: SIMD2(Float(f.width), Float(f.height)))
-        rugScene = RugScene(size: f.size)
-        scanner = DesktopScanner(screenHeight: f.height)
+        let saved = CGPoint(x: d.double(forKey: "cx"), y: d.double(forKey: "cy"))
+        placement = Placement(center: saved.x > 0 ? saved : CGPoint(x: f.width * 0.42, y: f.height * 0.45),
+                              angle: CGFloat(d.object(forKey: "angle") as? Double ?? -0.06), size: .zero, fringe: 0)
         super.init()
         view.controller = self
-        view.scene = rugScene.scene
-        view.pointOfView = rugScene.camera
-        view.isPlaying = false
-        view.rendersContinuously = false
-
-        applyFeel()
-        buildRug(drop: true)
-        scanner.onChange = { [weak self] items in
-            guard let self else { return }
-            self.items = items
-            DesktopScanner.stampLumps(items, into: self.field)
-            self.wake()
-        }
-        scanner.start()
+        restyle()
+        placement.center = clamped(placement.center)
     }
 
     func show() {
         if visible { window.orderFront(nil) }
-        stepTimer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
-        RunLoop.main.add(stepTimer!, forMode: .common)
-        pollTimer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.poll() }
-        RunLoop.main.add(pollTimer!, forMode: .common)
+        poller = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.poll() }
+        RunLoop.main.add(poller!, forMode: .common)
     }
 
-    // MARK: rug lifecycle
+    // MARK: drawing
 
-    func buildRug(drop: Bool, center: SIMD2<Float>? = nil, angle: Float? = nil) {
-        let s = rugSize.points(for: screen.frame.size)
-        let fringe: Float = min(26, s.y * 0.07)
-        let total = SIMD2(s.x + 2 * fringe, s.y)
-        let saved = SIMD2(Float(d.double(forKey: "cx")), Float(d.double(forKey: "cy")))
-        let sc = SIMD2(Float(screen.frame.width), Float(screen.frame.height))
-        var c = center ?? (saved.x > 0 ? saved : SIMD2(sc.x * 0.42, sc.y * 0.45))
-        c = simd_clamp(c, total * 0.3, sc - total * 0.3)
-        let a = angle ?? (d.object(forKey: "angle") as? Double).map { Float($0) } ?? -0.06
-        cloth.build(center: c, size: total, angle: a, dropHeight: drop ? 70 : 2)
+    /// Rebuild the texture after the design or size changes.
+    private func restyle() {
+        let body = rugSize.body(for: screen.frame.size)
+        let fringe = min(26, body.height * 0.07)
+        placement.size = CGSize(width: body.width + 2 * fringe, height: body.height)
+        placement.fringe = fringe
         var custom: NSImage?
         if pattern == .custom, let path = d.string(forKey: "customImage") { custom = NSImage(contentsOfFile: path) }
-        rugScene.setTexture(RugArt.texture(pattern, body: CGSize(width: CGFloat(s.x), height: CGFloat(s.y)), fringe: CGFloat(fringe), customImage: custom), rugSize: total)
-        rugScene.update(cloth)
-        wake()
+        texture = RugArt.texture(pattern, body: body, fringe: fringe, customImage: custom)
+        render()
     }
 
-    private func applyFeel() {
-        cloth.friction = feel.friction
-        cloth.damping = feel.damping
-        cloth.setBend(feel.bend)
+    private func render() {
+        view.rugFrame = RugFrame(placement: placement, texture: texture, fold: fold, opacity: opacity,
+                                 controls: chrome.controls, rotateTip: chrome.tip, optionBadge: peeking)
     }
 
-    private func wake() {
-        if !awake { view.preferredFramesPerSecond = 60 }
-        awake = true
-        stillFrames = 0
+    /// Runs at 60 Hz only while something is easing: the ⌥ fade or a peel springing back flat.
+    private func animate() {
+        guard animator == nil else { return }
+        animator = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.step() }
+        RunLoop.main.add(animator!, forMode: .common)
     }
 
-    private func tick() {
-        guard awake, visible else { return }
-        if formFrames > 0 {
-            // ~0.4 s glide into shape, then physics takes over and it drapes onto the lumps again
-            formFrames -= 1
-            cloth.form(from: formStart, to: formTargets, t: 1 - Float(formFrames) / Float(RugController.formLength))
-            rugScene.update(cloth)
-            return
+    private func step() {
+        var busy = false
+        let target: CGFloat = peeking ? 0.12 : 1
+        if abs(opacity - target) > 0.01 { opacity += (target - opacity) * 0.3; busy = true } else { opacity = target }
+        if let u = unfolding, var f = fold {
+            let t = min((ProcessInfo.processInfo.systemUptime - u.start) / 0.32, 1), e = 1 - pow(1 - t, 3)
+            f.to = CGPoint(x: u.from.x + (f.from.x - u.from.x) * e, y: u.from.y + (f.from.y - u.from.y) * e)
+            if t < 1 { fold = f; busy = true } else { fold = nil; unfolding = nil }
         }
-        cloth.step(1.0 / 120)
-        cloth.step(1.0 / 120)
-        rugScene.update(cloth)
-        if !cloth.isGrabbing && formFrames == 0 && cloth.motion < 0.02 {
-            stillFrames += 1
-            if stillFrames > 45 {  // settled: stop simulating and redrawing until something changes
-                awake = false
-                view.preferredFramesPerSecond = 1
-                save()
-            }
-        } else {
-            stillFrames = 0
-        }
+        render()
+        if !busy { animator?.invalidate(); animator = nil }
     }
 
-    private func save() {
-        let c = cloth.centroid
-        d.set(Double(c.x), forKey: "cx"); d.set(Double(c.y), forKey: "cy"); d.set(Double(cloth.angle), forKey: "angle")
+    // MARK: pointer
+
+    private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+    /// The controls stay up for a moment after the pointer leaves, so it can travel from the rug to the pill.
+    private var controlsUp: Bool { gesture != nil || now - lastOver < 0.8 }
+
+    private func onHandle(_ p: CGPoint) -> Bool {
+        controlsUp && placement.corners.contains { hypot($0.x - p.x, $0.y - p.y) <= Renderer.handleHit }
     }
 
-    /// Track the pointer: take mouse events only over the rug, and fade it while ⌥ is held.
+    private func onPill(_ p: CGPoint) -> Bool { controlsUp && Renderer.pill(for: placement).contains(p) }
+
+    /// Take the mouse only over the rug and its controls, and fade the rug while ⌥ is held.
     private func poll() {
         guard visible else { return }
         let m = NSEvent.mouseLocation
-        let p = SIMD2(Float(m.x - screen.frame.minX), Float(m.y - screen.frame.minY))
+        let p = CGPoint(x: m.x - screen.frame.minX, y: m.y - screen.frame.minY)
         let alt = NSEvent.modifierFlags.contains(.option)
-        if alt != peeking {
-            peeking = alt
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
-                window.animator().alphaValue = alt ? 0.14 : 1
-            }
-        }
-        let over = cloth.isGrabbing || (!peeking && cloth.contains(p))
+        if alt != peeking { peeking = alt; animate() }
+
+        let handle = !peeking && onHandle(p), pill = !peeking && onPill(p), rug = !peeking && placement.contains(p)
+        let over = gesture != nil || handle || pill || rug
+        if over { lastOver = now }
         if window.ignoresMouseEvents == over { window.ignoresMouseEvents = !over }
-        if over != hovering {
-            hovering = over
-            (over ? NSCursor.openHand : NSCursor.arrow).set()
+
+        let c: NSCursor? = gesture != nil ? .closedHand : handle || pill ? .arrow : rug ? .openHand : nil
+        if c !== cursor { (c ?? .arrow).set(); cursor = c }
+
+        let rotating: Bool
+        if case .rotate = gesture { rotating = true } else { rotating = false }
+        let next = (controls: controlsUp && !peeking, tip: handle && gesture == nil || rotating ? p : nil)
+        if next.controls != chrome.controls || next.tip != chrome.tip {
+            chrome = next
+            render()
         }
     }
 
-    // MARK: interaction
-
-    func grab(_ p: SIMD2<Float>) { cloth.grab(at: p); NSCursor.closedHand.set(); wake() }
-    func drag(_ p: SIMD2<Float>) { cloth.moveGrab(to: p); wake() }
-    func drop() { cloth.release(); NSCursor.openHand.set(); wake() }
-    func spin(_ a: Float) { guard !cloth.isGrabbing else { return }; cloth.rotate(by: a); wake() }
-    func shake() { cloth.shake(); wake() }
-
-    /// Double-tap Space: the rug firms up and settles back into a neat rectangle where it lies.
-    func firm() {
-        guard visible, !cloth.isGrabbing else { return }
-        formTargets = cloth.formTargets()
-        formStart = cloth.pos
-        formFrames = RugController.formLength
-        wake()
+    func press(_ p: CGPoint, _ e: NSEvent) {
+        if onPill(p) { pillClick(p, e); return }
+        if onHandle(p) {
+            gesture = .rotate(angle: placement.angle, bearing: atan2(p.y - placement.center.y, p.x - placement.center.x))
+        } else if placement.contains(p) {
+            let q = placement.local(p)
+            if placement.inset(q) < Self.peelBand {
+                fold = Fold(from: q, to: q)
+                unfolding = nil
+                gesture = .peel
+            } else {
+                gesture = .move(offset: CGVector(dx: placement.center.x - p.x, dy: placement.center.y - p.y))
+            }
+        } else { return }
+        NSCursor.closedHand.set(); cursor = .closedHand
+        render()
     }
 
-    static let formLength = 24
-
-    func startKeyWatch(prompt: Bool) {
-        keyMonitors.forEach { NSEvent.removeMonitor($0) }
-        keyMonitors = []
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(opts)  // global key events need Accessibility; without it only the menu works
-        let handle: (NSEvent) -> Void = { [weak self] e in self?.key(e) }
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: handle) { keyMonitors.append(g) }
-        if let l = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { handle($0); return $0 }) { keyMonitors.append(l) }
-    }
-
-    private func key(_ e: NSEvent) {
-        guard e.keyCode == 49, e.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty, !e.isARepeat else {
-            lastSpace = 0
+    func drag(_ p: CGPoint) {
+        switch gesture {
+        case .move(let o):
+            placement.center = clamped(CGPoint(x: p.x + o.dx, y: p.y + o.dy))
+        case .rotate(let a, let b):
+            placement.angle = a + atan2(p.y - placement.center.y, p.x - placement.center.x) - b
+            chrome.tip = p
+        case .peel:
+            fold?.to = placement.local(p)
+        case nil:
             return
         }
-        // Only when you're on the desktop with the pointer over the rug, so typing two spaces elsewhere never fires it.
-        let onDesktop = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder"
-            || NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-        let m = NSEvent.mouseLocation
-        let over = cloth.contains(SIMD2(Float(m.x - screen.frame.minX), Float(m.y - screen.frame.minY)))
-        guard onDesktop, over else { lastSpace = 0; return }
-        let now = e.timestamp
-        if lastSpace > 0, now - lastSpace < 0.4 {
-            lastSpace = 0
-            firm()
-        } else {
-            lastSpace = now
+        render()
+    }
+
+    func release() {
+        if case .peel = gesture, let f = fold {
+            unfolding = (f.to, now)
+            animate()
         }
+        gesture = nil
+        save()
+        render()
+    }
+
+    func spin(_ a: CGFloat) {
+        guard gesture == nil else { return }
+        placement.angle += a
+        save()
+        render()
+    }
+
+    private func clamped(_ c: CGPoint) -> CGPoint {
+        let b = view.bounds.insetBy(dx: 40, dy: 40)
+        return CGPoint(x: min(max(c.x, b.minX), b.maxX), y: min(max(c.y, b.minY), b.maxY))
+    }
+
+    private func save() {
+        d.set(Double(placement.center.x), forKey: "cx")
+        d.set(Double(placement.center.y), forKey: "cy")
+        d.set(Double(placement.angle), forKey: "angle")
+    }
+
+    // MARK: design pill
+
+    private func pillClick(_ p: CGPoint, _ e: NSEvent) {
+        let r = Renderer.pill(for: placement)
+        if p.x < r.minX + 32 { cycle(-1) } else if p.x > r.maxX - 32 { cycle(1) } else {
+            NSMenu.popUpContextMenu(designMenu(), with: e, for: view)
+        }
+    }
+
+    private func cycle(_ by: Int) {
+        let all = Pattern.allCases.filter { $0 != .custom }
+        let i = all.firstIndex(of: pattern) ?? 0
+        pattern = all[(i + by + all.count) % all.count]
+        restyle()
     }
 
     // MARK: menu
@@ -272,40 +276,31 @@ final class RugController: NSObject, NSMenuDelegate {
         return i
     }
 
+    private func designMenu() -> NSMenu {
+        let m = NSMenu()
+        for p in Pattern.allCases { m.addItem(item(p.title, #selector(choosePattern(_:)), on: p == pattern, obj: p.rawValue)) }
+        return m
+    }
+
     private func populate(_ m: NSMenu) {
         m.removeAllItems()
         m.addItem(item(visible ? "Hide Rug" : "Show Rug", #selector(toggle)))
         m.addItem(.separator())
-        let pat = NSMenu()
-        for p in Pattern.allCases { pat.addItem(item(p.title, #selector(choosePattern(_:)), on: p == pattern, obj: p.rawValue)) }
-        let pi = NSMenuItem(title: "Rug", action: nil, keyEquivalent: ""); pi.submenu = pat; m.addItem(pi)
+        let di = NSMenuItem(title: "Design", action: nil, keyEquivalent: ""); di.submenu = designMenu(); m.addItem(di)
         let sz = NSMenu()
         for s in RugSize.allCases { sz.addItem(item(s.title, #selector(chooseSize(_:)), on: s == rugSize, obj: s.rawValue)) }
         let si = NSMenuItem(title: "Size", action: nil, keyEquivalent: ""); si.submenu = sz; m.addItem(si)
-        let fl = NSMenu()
-        for f in Feel.allCases { fl.addItem(item(f.title, #selector(chooseFeel(_:)), on: f == feel, obj: f.rawValue)) }
-        let fi = NSMenuItem(title: "Fabric", action: nil, keyEquivalent: ""); fi.submenu = fl; m.addItem(fi)
-        m.addItem(item("Shake It Out", #selector(shakeAction)))
         m.addItem(item("Straighten", #selector(straighten)))
-        m.addItem(item("Firm Up  (double-tap Space)", #selector(firmAction)))
-        if !AXIsProcessTrusted() {
-            let w = NSMenuItem(title: "Allow Accessibility so double-Space works…", action: #selector(askAccessibility), keyEquivalent: "")
-            w.target = self
-            m.addItem(w)
-        }
         m.addItem(.separator())
-        let n = Sweeper.candidates().count
-        m.addItem(item(n > 0 ? "Sweep \(n) Item\(n == 1 ? "" : "s") Under the Rug…" : "Desktop Is Already Clean", n > 0 ? #selector(sweep) : nil))
-        if Sweeper.canUnsweep { m.addItem(item("Unsweep Last Sweep", #selector(unsweep))) }
+        let n = Finder.desktopCount
+        m.addItem(item(sweeping ? "Sweeping…" : n > 0 ? "Sweep \(n) Icon\(n == 1 ? "" : "s") Under the Rug" : "Desktop Is Already Clean",
+                       n > 0 && !sweeping ? #selector(sweep) : nil))
+        if Sweeper.canUnsweep { m.addItem(item("Put the Icons Back", sweeping ? nil : #selector(unsweep))) }
         m.addItem(.separator())
-        let tip = NSMenuItem(title: "Drag to move · scroll to rotate · double-click to shake · double-Space to firm · hold ⌥ to peek", action: nil, keyEquivalent: "")
+        let tip = NSMenuItem(title: "Drag to move · drag an edge to peek under · drag a corner dot to rotate · hold ⌥ to see through",
+                             action: nil, keyEquivalent: "")
         tip.isEnabled = false
         m.addItem(tip)
-        if !scanner.usingFinder {
-            let w = NSMenuItem(title: "Allow Finder access in System Settings to drape over icons exactly", action: #selector(openAutomation), keyEquivalent: "")
-            w.target = self
-            m.addItem(w)
-        }
         m.addItem(.separator())
         m.addItem(item("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         m.addItem(item("Quit Underrug", #selector(quit), "q"))
@@ -313,7 +308,7 @@ final class RugController: NSObject, NSMenuDelegate {
 
     @objc private func toggle() {
         visible.toggle()
-        if visible { window.orderFront(nil); buildRug(drop: true, center: cloth.centroid, angle: cloth.angle) } else { window.orderOut(nil) }
+        if visible { window.orderFront(nil) } else { window.orderOut(nil) }
     }
 
     @objc private func choosePattern(_ s: NSMenuItem) {
@@ -327,61 +322,62 @@ final class RugController: NSObject, NSMenuDelegate {
             d.set(url.path, forKey: "customImage")
         }
         pattern = p
-        buildRug(drop: true, center: cloth.centroid, angle: cloth.angle)
+        restyle()
     }
 
     @objc private func chooseSize(_ s: NSMenuItem) {
         guard let v = RugSize(rawValue: s.representedObject as? String ?? "") else { return }
         rugSize = v
-        buildRug(drop: true, center: cloth.centroid, angle: cloth.angle)
+        restyle()
+        placement.center = clamped(placement.center)
+        save()
+        render()
     }
 
-    @objc private func chooseFeel(_ s: NSMenuItem) {
-        guard let v = Feel(rawValue: s.representedObject as? String ?? "") else { return }
-        feel = v
-        applyFeel()
-        wake()
+    @objc private func straighten() {
+        placement.angle = 0
+        save()
+        render()
     }
-
-    @objc private func shakeAction() { shake() }
-    @objc private func firmAction() { firm() }
-    @objc private func askAccessibility() {
-        startKeyWatch(prompt: true)
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-    }
-    @objc private func straighten() { buildRug(drop: true, center: cloth.centroid, angle: 0) }
 
     @objc private func sweep() {
-        let n = Sweeper.candidates().count
-        NSApp.activate(ignoringOtherApps: true)
-        let a = NSAlert()
-        a.messageText = "Sweep \(n) item\(n == 1 ? "" : "s") under the rug?"
-        a.informativeText = "They'll move into a dated folder inside “\(DesktopScanner.rugFolder)” on your Desktop, which hides under the rug. Nothing is deleted, and Unsweep puts everything back."
-        a.addButton(withTitle: "Sweep")
-        a.addButton(withTitle: "Cancel")
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        let r = Sweeper.sweep()
-        let c = cloth.centroid
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            DesktopScanner.place(DesktopScanner.rugFolder, at: CGPoint(x: CGFloat(c.x), y: CGFloat(c.y)), screenHeight: self.screen.frame.height)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.scanner.rescan() }
+        sweeping = true
+        let rug = placement, h = screen.frame.height
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = Sweeper.sweep(under: rug, screenHeight: h)
+            DispatchQueue.main.async {
+                self.sweeping = false
+                switch r {
+                case .swept: break
+                case .nothingToSweep: self.info("Your desktop is already clean.")
+                case .noFinderAccess: self.askFinderAccess()
+                case .finderSorts:
+                    self.info("Finder is keeping your desktop sorted, so it put the icons straight back. Right-click the desktop, set Sort By to None and turn off Use Stacks, then sweep again.")
+                }
+            }
         }
-        if !r.failed.isEmpty { info("Swept \(r.moved). Couldn't move: \(r.failed.prefix(5).joined(separator: ", "))") }
     }
 
     @objc private func unsweep() {
-        let r = Sweeper.unsweepLast()
-        scanner.rescan()
-        if !r.skipped.isEmpty { info("Put back \(r.restored). Left in place (a file with that name already exists, or it was moved): \(r.skipped.prefix(5).joined(separator: ", "))") }
+        sweeping = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = Sweeper.unsweep()
+            DispatchQueue.main.async {
+                self.sweeping = false
+                guard let r else { self.askFinderAccess(); return }
+                if r.missing > 0 { self.info("Put back \(r.restored) icon\(r.restored == 1 ? "" : "s"). \(r.missing) are no longer on the desktop.") }
+            }
+        }
+    }
+
+    private func askFinderAccess() {
+        info("Underrug needs permission to move icons in Finder. Turn on Finder under Underrug in Privacy & Security ▸ Automation, then try again.")
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
     }
 
     private func info(_ s: String) {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert(); a.messageText = "Underrug"; a.informativeText = s; a.runModal()
-    }
-
-    @objc private func openAutomation() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
     }
 
     @objc private func toggleLogin() {
