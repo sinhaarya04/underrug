@@ -9,6 +9,7 @@ swiftc -Ounchecked -wmo -enforce-exclusivity=unchecked -swift-version 5 -target 
   -framework AppKit -framework ServiceManagement \
   Sources/*.swift -o "$APP/Contents/MacOS/Underrug"
 cp Info.plist "$APP/Contents/Info.plist"
+cp -R Rugs "$APP/Contents/Resources/Rugs"
 "$APP/Contents/MacOS/Underrug" --icon build/AppIcon.iconset
 iconutil -c icns build/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --deep -s - "$APP" >/dev/null

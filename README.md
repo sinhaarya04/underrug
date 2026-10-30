@@ -4,7 +4,7 @@ A rug for your Mac desktop. Sweep your mess under it.
 
 - **Drag** the rug to move it. **Drag an edge** to peel it back and peek at what's underneath; let go and it falls flat again.
 - **Drag a corner dot** to rotate it (or scroll over it).
-- The **Design** pill under the rug flips through the patterns: Persian, Kilim, Beni Ourain, Picnic Gingham, Sunset Stripes, or weave in your own image.
+- The **Design** pill under the rug flips through eight real antique rugs, photographed by The Met and in the public domain (Anatolian, Cairene, Chinese, a 1774 prayer rug; see [CREDITS.md](CREDITS.md)), or weave in your own image. Each rug keeps its real proportions.
 - **Hold ⌥** to see through it and click the files underneath.
 - **Sweep Under the Rug** has Finder pile every desktop icon beneath the rug. Only icon positions change, never the files, and **Put the Icons Back** returns each one to where it was. If Finder's *Sort By* or *Use Stacks* is on, Finder keeps its own order; Underrug says so instead of pretending.
 - **Select icons and drop them on the rug** (or select them and choose *Sweep Selected Icons Under the Rug*) to sweep just those. They slide under together; the files themselves stay put.

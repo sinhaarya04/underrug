@@ -87,9 +87,10 @@ final class RugController: NSObject, NSMenuDelegate {
     private var animator: Timer?
     private var poller: Timer?
     private var sweeping = false
+    private var customImage: NSImage?
     private let d = UserDefaults.standard
 
-    var pattern: Pattern { get { Pattern(rawValue: d.string(forKey: "pattern") ?? "") ?? .persian } set { d.set(newValue.rawValue, forKey: "pattern") } }
+    var pattern: Pattern { get { Pattern(rawValue: d.string(forKey: "pattern") ?? "") ?? .anatolianRed } set { d.set(newValue.rawValue, forKey: "pattern") } }
     var rugSize: RugSize { get { RugSize(rawValue: d.string(forKey: "size") ?? "") ?? .medium } set { d.set(newValue.rawValue, forKey: "size") } }
     /// Pinch, Bigger and Smaller stretch the chosen size by this much.
     var scale: CGFloat { get { CGFloat(d.object(forKey: "scale") as? Double ?? 1) } set { d.set(Double(newValue), forKey: "scale") } }
@@ -131,9 +132,15 @@ final class RugController: NSObject, NSMenuDelegate {
 
     // MARK: drawing
 
+    /// The chosen size, shaped like the real rug: the preset is a box the rug fits inside.
+    private var baseBody: CGSize {
+        let box = rugSize.body(for: screen.frame.size), a = RugArt.aspect(pattern, customImage: customImage)
+        return box.width / box.height > a ? CGSize(width: box.height * a, height: box.height) : CGSize(width: box.width, height: box.width / a)
+    }
+
     /// The woven part: the chosen size times `scale`, never smaller than a bath mat or bigger than the screen.
     private func bodySize(_ s: CGFloat) -> CGSize {
-        let base = rugSize.body(for: screen.frame.size), room = screen.frame.size
+        let base = baseBody, room = screen.frame.size
         let k = min(max(s, 220 / base.width), room.width * 0.95 / base.width, room.height * 0.92 / base.height)
         return CGSize(width: base.width * k, height: base.height * k)
     }
@@ -146,11 +153,10 @@ final class RugController: NSObject, NSMenuDelegate {
 
     /// Rebuild the texture after the design or size changes.
     private func restyle() {
+        customImage = pattern == .custom ? d.string(forKey: "customImage").flatMap(NSImage.init(contentsOfFile:)) : nil
         let body = bodySize(scale)
         fit(body)
-        var custom: NSImage?
-        if pattern == .custom, let path = d.string(forKey: "customImage") { custom = NSImage(contentsOfFile: path) }
-        texture = RugArt.texture(pattern, body: body, fringe: placement.fringe, customImage: custom)
+        texture = RugArt.texture(pattern, body: body, fringe: placement.fringe, customImage: customImage)
         render()
     }
 
@@ -269,7 +275,7 @@ final class RugController: NSObject, NSMenuDelegate {
 
     private func resize(to s: CGFloat, final: Bool) {
         let body = bodySize(s)
-        scale = body.width / rugSize.body(for: screen.frame.size).width
+        scale = body.width / baseBody.width
         if final { restyle() } else { fit(body) }
         placement.center = clamped(placement.center)
         if final { save() }
@@ -333,7 +339,16 @@ final class RugController: NSObject, NSMenuDelegate {
 
     private func designMenu() -> NSMenu {
         let m = NSMenu()
-        for p in Pattern.allCases { m.addItem(item(p.title, #selector(choosePattern(_:)), on: p == pattern, obj: p.rawValue)) }
+        for p in Pattern.allCases {
+            let i = item(p.title, #selector(choosePattern(_:)), on: p == pattern, obj: p.rawValue)
+            if !p.origin.isEmpty { i.toolTip = p.origin }
+            if #available(macOS 14.4, *), !p.origin.isEmpty { i.subtitle = p.origin }
+            m.addItem(i)
+        }
+        m.addItem(.separator())
+        let credit = NSMenuItem(title: "Rugs from The Met's Open Access collection", action: nil, keyEquivalent: "")
+        credit.isEnabled = false
+        m.addItem(credit)
         return m
     }
 

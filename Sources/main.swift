@@ -49,8 +49,8 @@ func snapshot(_ args: [String]) {
     let out = args.first { $0.hasSuffix(".png") } ?? "underrug.png"
     let size = CGSize(width: 1512, height: 982)
     let name = args.firstIndex(of: "--pattern").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
-    let pattern = Pattern(rawValue: name ?? "") ?? .persian
-    let body = CGSize(width: 620, height: 400), fringe: CGFloat = 26
+    let pattern = Pattern(rawValue: name ?? "") ?? .anatolianRed
+    let body = CGSize(width: 620, height: 620 / RugArt.aspect(pattern)), fringe: CGFloat = 26
     let rug = Placement(center: CGPoint(x: size.width * 0.48, y: size.height * 0.52), angle: -0.06,
                         size: CGSize(width: body.width + 2 * fringe, height: body.height), fringe: fringe)
 
@@ -115,7 +115,8 @@ private func fakeIcon(_ ctx: CGContext, _ c: CGPoint) {
 /// --icon dir: render AppIcon.iconset PNGs.
 func renderIcon(_ dir: String) {
     try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-    guard let tex = RugArt.texture(.persian, body: CGSize(width: 520, height: 340), fringe: 30) else { return }
+    let a = RugArt.aspect(.anatolianRed)
+    guard let tex = RugArt.texture(.anatolianRed, body: CGSize(width: 520, height: 520 / a), fringe: 30) else { return }
     for base in [16, 32, 128, 256, 512] {
         for scale in [1, 2] {
             let px = CGFloat(base * scale)
@@ -126,7 +127,7 @@ func renderIcon(_ dir: String) {
                 ctx.saveGState()
                 ctx.translateBy(x: r.midX, y: r.midY)
                 ctx.rotate(by: -0.18)
-                let w = px * 0.78, h = w * 340 / 580
+                let w = px * 0.78, h = w * (520 / a) / 580
                 ctx.setShadow(offset: CGSize(width: 0, height: -px * 0.02), blur: px * 0.04, color: NSColor(white: 0, alpha: 0.45).cgColor)
                 ctx.draw(tex, in: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
                 ctx.restoreGState()
