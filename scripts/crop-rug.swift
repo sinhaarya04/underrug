@@ -15,17 +15,19 @@ for (cx, cy) in [(0, 0), (dw - 6, 0), (0, dh - 6), (dw - 6, dh - 6)] { for y in 
 func far(_ c: (Double, Double, Double)) -> Bool { bg.allSatisfy { b in abs(c.0-b.0) + abs(c.1-b.1) + abs(c.2-b.2) > 60 } }
 var colHit = [Int](repeating: 0, count: dw), rowHit = [Int](repeating: 0, count: dh)
 for y in 0..<dh { for x in 0..<dw where far(p(x, y)) { colHit[x] += 1; rowHit[y] += 1 } }
-let cols = colHit.indices.filter { Double(colHit[$0]) > Double(dh) * 0.55 }, rows = rowHit.indices.filter { Double(rowHit[$0]) > Double(dw) * 0.55 }
+// 80%: a row of fringe strands has backdrop showing between them, so it falls short and is left out
+// (Underrug draws its own fringe)
+let cols = colHit.indices.filter { Double(colHit[$0]) > Double(dh) * 0.8 }, rows = rowHit.indices.filter { Double(rowHit[$0]) > Double(dw) * 0.8 }
 guard let x0 = cols.first, let x1 = cols.last, let y0 = rows.first, let y1 = rows.last else { fatalError("no rug found") }
 let s = Double(src.width) / Double(dw)
-// trim a hair more so no background sliver survives; CG y is bottom-up in the bitmap, rows were read top-down
-let inset = 0.022
+// trim a hair more so no background sliver survives
+let inset = 0.012
 let w = Double(x1 - x0), h = Double(y1 - y0)
 var r = CGRect(x: (Double(x0) + w * inset) * s, y: (Double(y0) + h * inset) * s, width: w * (1 - 2 * inset) * s, height: h * (1 - 2 * inset) * s)
 r = r.integral.intersection(CGRect(x: 0, y: 0, width: src.width, height: src.height))
-// bitmap rows: CGContext with data stores row 0 at the top of memory = top of the image when drawn y-up? draw flips; map back
-let flipped = CGRect(x: r.minX, y: CGFloat(src.height) - r.maxY, width: r.width, height: r.height)
-guard let cut = src.cropping(to: flipped) ?? src.cropping(to: r) else { fatalError("crop failed") }
+// a bitmap context's first row in memory is the top of the image, and cropping(to:) also measures
+// from the top-left, so the rows found above map straight across
+guard let cut = src.cropping(to: r) else { fatalError("crop failed") }
 // landscape, long side capped
 let rotate = cut.height > cut.width
 let ow = rotate ? cut.height : cut.width, oh = rotate ? cut.width : cut.height
