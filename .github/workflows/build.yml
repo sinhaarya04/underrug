@@ -26,7 +26,7 @@ jobs:
           $APP --snapshot snapshots/fold.png --fold
           $APP --snapshot snapshots/lifted.png --lifted
           $APP --snapshot snapshots/peek.png --peek
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: snapshots
           path: snapshots/
