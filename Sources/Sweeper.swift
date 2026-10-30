@@ -20,9 +20,11 @@ enum Sweeper {
 
     static var canUnsweep: Bool { load() != nil }
 
+    /// Sweep every desktop icon, or only the ones named in `only` (a selection, or a drop on the rug).
     /// Slow (it talks to Finder): call off the main thread.
-    static func sweep(under rug: Placement, screenHeight: CGFloat) -> Outcome {
-        guard let icons = Finder.icons() else { return .noFinderAccess }
+    static func sweep(under rug: Placement, screenHeight: CGFloat, only: Set<String>? = nil) -> Outcome {
+        guard var icons = Finder.icons() else { return .noFinderAccess }
+        if let only { icons = icons.filter { only.contains($0.name) } }
         guard !icons.isEmpty else { return .nothingToSweep }
         let targets = pile(icons.count, under: rug).map { CGPoint(x: $0.x, y: screenHeight - $0.y) }
 

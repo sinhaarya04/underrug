@@ -37,6 +37,26 @@ final class RugView: NSView {
     override func mouseUp(with e: NSEvent) { controller?.release() }
     override func scrollWheel(with e: NSEvent) { controller?.spin(e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 0.004 : 0.04)) }
     override func rightMouseDown(with e: NSEvent) { if let m = controller?.menu() { NSMenu.popUpContextMenu(m, with: e, for: self) } }
+
+    // Desktop icons dragged from Finder and dropped on the rug go under it. The drop answers
+    // .generic, never .move, so Finder leaves the files where they are; only the icons move.
+    private func droppedNames(_ info: NSDraggingInfo) -> [String] {
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return Finder.onDesktop(urls)
+    }
+    private func dropTarget(_ info: NSDraggingInfo) -> NSDragOperation {
+        let p = convert(info.draggingLocation, from: nil)
+        return controller?.acceptsDrop(at: p) == true && !droppedNames(info).isEmpty ? .generic : []
+    }
+    override func draggingEntered(_ info: NSDraggingInfo) -> NSDragOperation { dropTarget(info) }
+    override func draggingUpdated(_ info: NSDraggingInfo) -> NSDragOperation { dropTarget(info) }
+    override func performDragOperation(_ info: NSDraggingInfo) -> Bool {
+        let names = droppedNames(info)
+        guard !names.isEmpty else { return false }
+        // Finder snaps the icons back first; sweep a beat later so ours is the last word.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.controller?.sweep(only: Set(names)) }
+        return true
+    }
 }
 
 final class RugController: NSObject, NSMenuDelegate {
@@ -87,6 +107,7 @@ final class RugController: NSObject, NSMenuDelegate {
         view = RugView(frame: NSRect(origin: .zero, size: f.size))
         view.wantsLayer = true
         view.layerContentsRedrawPolicy = .onSetNeedsDisplay
+        view.registerForDraggedTypes([.fileURL])
         window.contentView = view
 
         let saved = CGPoint(x: d.double(forKey: "cx"), y: d.double(forKey: "cy"))
@@ -168,8 +189,10 @@ final class RugController: NSObject, NSMenuDelegate {
         if over { lastOver = now }
         if window.ignoresMouseEvents == over { window.ignoresMouseEvents = !over }
 
+        // a button held with no gesture of ours is a drag from Finder: leave its cursor alone
+        let theirs = gesture == nil && NSEvent.pressedMouseButtons != 0
         let c: NSCursor? = gesture != nil ? .closedHand : handle || pill ? .arrow : rug ? .openHand : nil
-        if c !== cursor { (c ?? .arrow).set(); cursor = c }
+        if c !== cursor && !theirs { (c ?? .arrow).set(); cursor = c }
 
         let rotating: Bool
         if case .rotate = gesture { rotating = true } else { rotating = false }
@@ -229,6 +252,8 @@ final class RugController: NSObject, NSMenuDelegate {
         save()
         render()
     }
+
+    func acceptsDrop(at p: CGPoint) -> Bool { visible && !peeking && !sweeping && placement.contains(p) }
 
     private func clamped(_ c: CGPoint) -> CGPoint {
         let b = view.bounds.insetBy(dx: 40, dy: 40)
@@ -294,10 +319,11 @@ final class RugController: NSObject, NSMenuDelegate {
         m.addItem(.separator())
         let n = Finder.desktopCount
         m.addItem(item(sweeping ? "Sweeping…" : n > 0 ? "Sweep \(n) Icon\(n == 1 ? "" : "s") Under the Rug" : "Desktop Is Already Clean",
-                       n > 0 && !sweeping ? #selector(sweep) : nil))
+                       n > 0 && !sweeping ? #selector(sweepAll) : nil))
+        m.addItem(item("Sweep Selected Icons Under the Rug", sweeping ? nil : #selector(sweepSelection)))
         if Sweeper.canUnsweep { m.addItem(item("Put the Icons Back", sweeping ? nil : #selector(unsweep))) }
         m.addItem(.separator())
-        let tip = NSMenuItem(title: "Drag to move · drag an edge to peek under · drag a corner dot to rotate · hold ⌥ to see through",
+        let tip = NSMenuItem(title: "Drag to move · drag an edge to peek under · drag a corner dot to rotate · hold ⌥ to see through · drop icons on it to sweep them",
                              action: nil, keyEquivalent: "")
         tip.isEnabled = false
         m.addItem(tip)
@@ -340,16 +366,33 @@ final class RugController: NSObject, NSMenuDelegate {
         render()
     }
 
-    @objc private func sweep() {
+    @objc private func sweepAll() { sweep(only: nil) }
+
+    @objc private func sweepSelection() {
+        sweeping = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let names = Finder.selection()
+            DispatchQueue.main.async {
+                self.sweeping = false
+                guard let names else { self.askFinderAccess(); return }
+                if names.isEmpty { self.info("Select some icons on the desktop first, then sweep them. Or drag them straight onto the rug.") }
+                else { self.sweep(only: Set(names)) }
+            }
+        }
+    }
+
+    /// Everything on the desktop, or just these icons (a Finder selection or a drop on the rug).
+    func sweep(only names: Set<String>?) {
+        guard !sweeping else { return }
         sweeping = true
         let rug = placement, h = screen.frame.height
         DispatchQueue.global(qos: .userInitiated).async {
-            let r = Sweeper.sweep(under: rug, screenHeight: h)
+            let r = Sweeper.sweep(under: rug, screenHeight: h, only: names)
             DispatchQueue.main.async {
                 self.sweeping = false
                 switch r {
                 case .swept: break
-                case .nothingToSweep: self.info("Your desktop is already clean.")
+                case .nothingToSweep: self.info(names == nil ? "Your desktop is already clean." : "None of those are on the desktop.")
                 case .noFinderAccess: self.askFinderAccess()
                 case .finderSorts:
                     self.info("Finder is keeping your desktop sorted, so it put the icons straight back. Right-click the desktop, set Sort By to None and turn off Use Stacks, then sweep again.")

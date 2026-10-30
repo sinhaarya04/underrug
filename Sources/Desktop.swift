@@ -28,6 +28,31 @@ enum Finder {
         return out
     }
 
+    /// Names of the desktop icons selected in Finder right now (items selected inside other
+    /// Finder windows don't count), or nil without Finder access.
+    static func selection() -> [String]? {
+        let src = """
+        tell application "Finder"
+            set out to {}
+            repeat with i in (get selection as list)
+                set end of out to POSIX path of (i as alias)
+            end repeat
+            return out
+        end tell
+        """
+        var err: NSDictionary?
+        guard let d = NSAppleScript(source: src)?.executeAndReturnError(&err), err == nil else { return nil }
+        var paths = [String]()
+        if d.numberOfItems > 0 { for k in 1...d.numberOfItems { if let s = d.atIndex(k)?.stringValue { paths.append(s) } } }
+        return onDesktop(paths.map { URL(fileURLWithPath: $0) })
+    }
+
+    /// The desktop icon names among these files; anything elsewhere on disk is dropped.
+    static func onDesktop(_ urls: [URL]) -> [String] {
+        let desk = desktopURL.standardizedFileURL.path
+        return urls.filter { $0.standardizedFileURL.deletingLastPathComponent().path == desk }.map(\.lastPathComponent)
+    }
+
     /// Move icons in one Finder round trip. A name that has gone missing is skipped, not fatal.
     static func move(_ spots: [(name: String, to: CGPoint)]) {
         guard !spots.isEmpty else { return }
