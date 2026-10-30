@@ -43,7 +43,7 @@ func writePNG(_ img: NSImage, _ path: String) {
     try? png.write(to: URL(fileURLWithPath: path))
 }
 
-/// --snapshot out.png [--pattern kilim] [--fold] [--controls] [--peek] [--swept]:
+/// --snapshot out.png [--pattern kilim] [--fold] [--lifted] [--controls] [--peek] [--swept]:
 /// render one frame over a stand-in desktop (wood floor, a handful of icons).
 func snapshot(_ args: [String]) {
     let out = args.first { $0.hasSuffix(".png") } ?? "underrug.png"
@@ -59,6 +59,10 @@ func snapshot(_ args: [String]) {
         let c = CGPoint(x: rug.body.maxX, y: rug.body.minY)
         frame.fold = Fold(from: c, to: CGPoint(x: c.x - 300, y: c.y + 170))
     }
+    if args.contains("--lifted") {  // turned most of the way back, showing the heap underneath
+        let c = CGPoint(x: rug.body.maxX, y: rug.body.maxY)
+        frame.fold = Fold(from: c, to: CGPoint(x: c.x - 760, y: c.y - 520))
+    }
     if args.contains("--controls") {
         frame.controls = true
         frame.rotateTip = rug.corners[1]
@@ -66,8 +70,8 @@ func snapshot(_ args: [String]) {
     if args.contains("--peek") { frame.opacity = 0.12; frame.optionBadge = true }
 
     var rng = SeededRNG(seed: 3)
-    let icons = args.contains("--swept") || args.contains("--fold") || args.contains("--peek")
-        ? Sweeper.pile(14, under: rug)
+    let icons = ["--swept", "--fold", "--peek", "--lifted"].contains(where: args.contains)
+        ? Sweeper.pile(22, under: rug)
         : (0..<14).map { k in CGPoint(x: size.width - 70 - CGFloat(k / 7) * 100, y: size.height - 90 - CGFloat(k % 7) * 110) }
 
     let img = NSImage(size: size, flipped: false) { rect in

@@ -57,19 +57,24 @@ enum Sweeper {
         return (moves.count, saved.spots.count - moves.count)
     }
 
-    /// Screen points (bottom-left origin) for `n` icons, scattered in a loose grid under the rug.
+    /// Screen points (bottom-left origin) for `n` icons: one tight, jumbled heap in the middle of the
+    /// rug, icons overlapping like a mess shoved together. It only spreads out when the heap would
+    /// otherwise poke out from under the rug.
     static func pile(_ n: Int, under rug: Placement) -> [CGPoint] {
-        // icons are ~64 pt with a label below; keep them clear of the edges
-        let inner = rug.body.insetBy(dx: min(46, rug.body.width / 4), dy: min(46, rug.body.height / 4))
-        let cols = max(1, Int((Double(n) * Double(inner.width / inner.height)).squareRoot().rounded(.up)))
+        // icons are ~64 pt with a label below; keep the heap that far inside the edges
+        let room = rug.body.insetBy(dx: min(46, rug.body.width / 4), dy: min(46, rug.body.height / 4))
+        let cols = max(1, Int((Double(n) * 1.3).squareRoot().rounded(.up)))
         let rows = max(1, (n + cols - 1) / cols)
-        let sx = inner.width / CGFloat(cols), sy = inner.height / CGFloat(rows)
-        var rng = SeededRNG(seed: UInt64(n))
-        return (0..<n).map { k in
-            let j = min(sx, sy) * 0.3
-            let q = CGPoint(x: inner.minX + (CGFloat(k % cols) + 0.5) * sx + .random(in: -j...j, using: &rng),
-                            y: inner.maxY - (CGFloat(k / cols) + 0.5) * sy + .random(in: -j...j, using: &rng))
-            return rug.screen(q)
+        let gap: CGFloat = 38
+        let sx = min(gap, room.width / CGFloat(cols)), sy = min(gap * 0.8, room.height / CGFloat(rows))
+        let w = sx * CGFloat(cols - 1), h = sy * CGFloat(rows - 1)
+        var rng = SeededRNG(seed: UInt64(n) &+ 11)
+        // shuffled so neighbours on the desktop don't stay neighbours in the heap
+        return (0..<n).shuffled(using: &rng).map { k in
+            let j = min(sx, sy) * 0.45
+            let q = CGPoint(x: room.midX - w / 2 + CGFloat(k % cols) * sx + .random(in: -j...j, using: &rng),
+                            y: room.midY + h / 2 - CGFloat(k / cols) * sy + .random(in: -j...j, using: &rng))
+            return rug.screen(CGPoint(x: min(max(q.x, room.minX), room.maxX), y: min(max(q.y, room.minY), room.maxY)))
         }
     }
 }
