@@ -5,6 +5,10 @@ All notable changes to Underrug are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `install.sh`: a one-line install that opens without the unidentified-developer prompt.
+
 ## [1.0.0] - 2026-10-30
 
 First public release.

@@ -37,11 +37,11 @@
 
 ## 📦 Install
 
-**Download:** grab `Underrug.zip` from the [latest release](https://github.com/sinhaarya04/underrug/releases/latest),
-unzip it and move `Underrug.app` to Applications.
+**One line** (recommended): downloads the latest release into Applications and opens it.
 
-Underrug isn't notarized yet, so the first time, right-click the app and choose **Open** (or run
-`xattr -dr com.apple.quarantine /Applications/Underrug.app`).
+```sh
+curl -fsSL https://raw.githubusercontent.com/sinhaarya04/underrug/main/install.sh | sh
+```
 
 **Build from source** (needs only Apple's Command Line Tools):
 
@@ -50,6 +50,11 @@ git clone https://github.com/sinhaarya04/underrug.git && cd underrug
 ./build.sh
 open build/Underrug.app
 ```
+
+Both open straight away. If you'd rather download `Underrug.zip` from the
+[latest release](https://github.com/sinhaarya04/underrug/releases/latest) in a browser: Underrug isn't notarized yet,
+so macOS warns the first time. Right-click the app and choose **Open** (or run
+`xattr -dr com.apple.quarantine /Applications/Underrug.app`).
 
 Requires macOS 13 Ventura or later, on Apple silicon or Intel.
 
