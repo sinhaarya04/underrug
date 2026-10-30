@@ -6,9 +6,11 @@ enum Finder {
 
     static var desktopURL: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop") }
 
-    /// Cheap count for menu titles; doesn't need Finder.
-    static var desktopCount: Int {
-        ((try? FileManager.default.contentsOfDirectory(atPath: desktopURL.path)) ?? []).filter { !$0.hasPrefix(".") }.count
+    /// Cheap count for menu titles; doesn't need Finder. Nil when macOS hasn't let Underrug read the
+    /// Desktop folder (Privacy & Security ▸ Files and Folders), which is not the same as an empty desktop.
+    static var desktopCount: Int? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: desktopURL.path) else { return nil }
+        return names.filter { !$0.hasPrefix(".") }.count
     }
 
     /// Every desktop icon, or nil when Underrug isn't allowed to ask Finder.

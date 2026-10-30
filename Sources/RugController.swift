@@ -369,9 +369,12 @@ final class RugController: NSObject, NSMenuDelegate {
         let si = NSMenuItem(title: "Size", action: nil, keyEquivalent: ""); si.submenu = sz; m.addItem(si)
         m.addItem(item("Straighten", #selector(straighten)))
         m.addItem(.separator())
+        // The sweep itself goes through Finder; the count is only for the title.
         let n = Finder.desktopCount
-        m.addItem(item(sweeping ? "Sweeping…" : n > 0 ? "Sweep \(n) Icon\(n == 1 ? "" : "s") Under the Rug" : "Desktop Is Already Clean",
-                       n > 0 && !sweeping ? #selector(sweepAll) : nil))
+        let sweepTitle = sweeping ? "Sweeping…"
+            : n == nil ? "Sweep All Icons Under the Rug"
+            : n! > 0 ? "Sweep \(n!) Icon\(n == 1 ? "" : "s") Under the Rug" : "Desktop Is Already Clean"
+        m.addItem(item(sweepTitle, n != 0 && !sweeping ? #selector(sweepAll) : nil))
         m.addItem(item("Sweep Selected Icons Under the Rug", sweeping ? nil : #selector(sweepSelection)))
         if Sweeper.canUnsweep { m.addItem(item("Put the Icons Back", sweeping ? nil : #selector(unsweep))) }
         m.addItem(.separator())
