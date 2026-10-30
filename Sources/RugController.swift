@@ -2,14 +2,15 @@ import AppKit
 import ServiceManagement
 
 enum RugSize: String, CaseIterable {
-    case small, medium, large, cover
-    var title: String { ["small": "Small", "medium": "Medium", "large": "Large", "cover": "Cover the Desktop"][rawValue]! }
+    case small, medium, large, huge, cover
+    var title: String { ["small": "Small", "medium": "Medium", "large": "Large", "huge": "Extra Large", "cover": "Cover the Desktop"][rawValue]! }
     /// The woven part; the fringe is added on the short ends.
     func body(for screen: CGSize) -> CGSize {
         switch self {
         case .small: return CGSize(width: 420, height: 270)
         case .medium: return CGSize(width: 620, height: 400)
         case .large: return CGSize(width: 860, height: 540)
+        case .huge: return CGSize(width: 1100, height: 700)
         case .cover: return CGSize(width: screen.width * 0.86, height: screen.height * 0.80)
         }
     }
@@ -35,6 +36,7 @@ final class RugView: NSView {
     override func mouseDown(with e: NSEvent) { controller?.press(pt(e), e) }
     override func mouseDragged(with e: NSEvent) { controller?.drag(pt(e)) }
     override func mouseUp(with e: NSEvent) { controller?.release() }
+    override func magnify(with e: NSEvent) { controller?.zoom(e.magnification, ended: e.phase == .ended || e.phase == .cancelled) }
     override func scrollWheel(with e: NSEvent) { controller?.spin(e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 0.004 : 0.04)) }
     override func rightMouseDown(with e: NSEvent) { if let m = controller?.menu() { NSMenu.popUpContextMenu(m, with: e, for: self) } }
 
@@ -89,6 +91,8 @@ final class RugController: NSObject, NSMenuDelegate {
 
     var pattern: Pattern { get { Pattern(rawValue: d.string(forKey: "pattern") ?? "") ?? .persian } set { d.set(newValue.rawValue, forKey: "pattern") } }
     var rugSize: RugSize { get { RugSize(rawValue: d.string(forKey: "size") ?? "") ?? .medium } set { d.set(newValue.rawValue, forKey: "size") } }
+    /// Pinch, Bigger and Smaller stretch the chosen size by this much.
+    var scale: CGFloat { get { CGFloat(d.object(forKey: "scale") as? Double ?? 1) } set { d.set(Double(newValue), forKey: "scale") } }
     var visible: Bool { get { d.object(forKey: "visible") as? Bool ?? true } set { d.set(newValue, forKey: "visible") } }
 
     init(screen: NSScreen) {
@@ -127,15 +131,26 @@ final class RugController: NSObject, NSMenuDelegate {
 
     // MARK: drawing
 
-    /// Rebuild the texture after the design or size changes.
-    private func restyle() {
-        let body = rugSize.body(for: screen.frame.size)
+    /// The woven part: the chosen size times `scale`, never smaller than a bath mat or bigger than the screen.
+    private func bodySize(_ s: CGFloat) -> CGSize {
+        let base = rugSize.body(for: screen.frame.size), room = screen.frame.size
+        let k = min(max(s, 220 / base.width), room.width * 0.95 / base.width, room.height * 0.92 / base.height)
+        return CGSize(width: base.width * k, height: base.height * k)
+    }
+
+    private func fit(_ body: CGSize) {
         let fringe = min(26, body.height * 0.07)
         placement.size = CGSize(width: body.width + 2 * fringe, height: body.height)
         placement.fringe = fringe
+    }
+
+    /// Rebuild the texture after the design or size changes.
+    private func restyle() {
+        let body = bodySize(scale)
+        fit(body)
         var custom: NSImage?
         if pattern == .custom, let path = d.string(forKey: "customImage") { custom = NSImage(contentsOfFile: path) }
-        texture = RugArt.texture(pattern, body: body, fringe: fringe, customImage: custom)
+        texture = RugArt.texture(pattern, body: body, fringe: placement.fringe, customImage: custom)
         render()
     }
 
@@ -246,6 +261,21 @@ final class RugController: NSObject, NSMenuDelegate {
         render()
     }
 
+    /// Pinch over the rug to resize it. Mid-pinch the old texture just stretches; it's rewoven at the new size when the pinch ends.
+    func zoom(_ m: CGFloat, ended: Bool) {
+        guard gesture == nil else { return }
+        resize(to: scale * (1 + m), final: ended)
+    }
+
+    private func resize(to s: CGFloat, final: Bool) {
+        let body = bodySize(s)
+        scale = body.width / rugSize.body(for: screen.frame.size).width
+        if final { restyle() } else { fit(body) }
+        placement.center = clamped(placement.center)
+        if final { save() }
+        render()
+    }
+
     func spin(_ a: CGFloat) {
         guard gesture == nil else { return }
         placement.angle += a
@@ -313,7 +343,14 @@ final class RugController: NSObject, NSMenuDelegate {
         m.addItem(.separator())
         let di = NSMenuItem(title: "Design", action: nil, keyEquivalent: ""); di.submenu = designMenu(); m.addItem(di)
         let sz = NSMenu()
-        for s in RugSize.allCases { sz.addItem(item(s.title, #selector(chooseSize(_:)), on: s == rugSize, obj: s.rawValue)) }
+        let stretched = abs(scale - 1) > 0.01
+        for s in RugSize.allCases { sz.addItem(item(s.title, #selector(chooseSize(_:)), on: s == rugSize && !stretched, obj: s.rawValue)) }
+        sz.addItem(.separator())
+        sz.addItem(item("Bigger", #selector(bigger), "="))
+        sz.addItem(item("Smaller", #selector(smaller), "-"))
+        if stretched { sz.addItem(item("Back to \(rugSize.title)", #selector(unstretch))) }
+        let hint = NSMenuItem(title: "Or pinch on the trackpad over the rug", action: nil, keyEquivalent: ""); hint.isEnabled = false
+        sz.addItem(hint)
         let si = NSMenuItem(title: "Size", action: nil, keyEquivalent: ""); si.submenu = sz; m.addItem(si)
         m.addItem(item("Straighten", #selector(straighten)))
         m.addItem(.separator())
@@ -354,11 +391,12 @@ final class RugController: NSObject, NSMenuDelegate {
     @objc private func chooseSize(_ s: NSMenuItem) {
         guard let v = RugSize(rawValue: s.representedObject as? String ?? "") else { return }
         rugSize = v
-        restyle()
-        placement.center = clamped(placement.center)
-        save()
-        render()
+        resize(to: 1, final: true)
     }
+
+    @objc private func bigger() { resize(to: scale * 1.15, final: true) }
+    @objc private func smaller() { resize(to: scale / 1.15, final: true) }
+    @objc private func unstretch() { resize(to: 1, final: true) }
 
     @objc private func straighten() {
         placement.angle = 0

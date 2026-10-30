@@ -8,7 +8,7 @@ A rug for your Mac desktop. Sweep your mess under it.
 - **Hold ⌥** to see through it and click the files underneath.
 - **Sweep Under the Rug** has Finder pile every desktop icon beneath the rug. Only icon positions change, never the files, and **Put the Icons Back** returns each one to where it was. If Finder's *Sort By* or *Use Stacks* is on, Finder keeps its own order; Underrug says so instead of pretending.
 - **Select icons and drop them on the rug** (or select them and choose *Sweep Selected Icons Under the Rug*) to sweep just those. They slide under together; the files themselves stay put.
-- **Size** goes from small to covering the whole desktop.
+- **Size** goes from small through Extra Large to covering the whole desktop. **Pinch** on the trackpad over the rug, or use *Bigger* / *Smaller* in the Size menu, to make it any size in between.
 
 Everything else is in the menu bar icon, or right-click the rug.
 

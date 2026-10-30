@@ -19,7 +19,7 @@ enum Pattern: String, CaseIterable {
 enum RugArt {
     static func texture(_ pattern: Pattern, body: CGSize, fringe: CGFloat, customImage: NSImage? = nil, seed: UInt64 = 7) -> CGImage? {
         let total = CGSize(width: body.width + 2 * fringe, height: body.height)
-        let scale = min(2.0, 2048 / max(total.width, total.height))
+        let scale = min(2.0, 3072 / max(total.width, total.height))  // stays sharp on Retina up to ~1500 pt
         let pw = Int(total.width * scale), ph = Int(total.height * scale)
         guard let ctx = CGContext(data: nil, width: pw, height: ph, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpaceCreateDeviceRGB(),
