@@ -13,12 +13,21 @@ func p(_ x: Int, _ y: Int) -> (Double, Double, Double) { let i = (y * dw + x) * 
 var bg = [(Double, Double, Double)]()
 for (cx, cy) in [(0, 0), (dw - 6, 0), (0, dh - 6), (dw - 6, dh - 6)] { for y in cy..<cy+6 { for x in cx..<cx+6 { bg.append(p(x, y)) } } }
 func far(_ c: (Double, Double, Double)) -> Bool { bg.allSatisfy { b in abs(c.0-b.0) + abs(c.1-b.1) + abs(c.2-b.2) > 60 } }
-var colHit = [Int](repeating: 0, count: dw), rowHit = [Int](repeating: 0, count: dh)
-for y in 0..<dh { for x in 0..<dw where far(p(x, y)) { colHit[x] += 1; rowHit[y] += 1 } }
-// 80%: a row of fringe strands has backdrop showing between them, so it falls short and is left out
-// (Underrug draws its own fringe)
-let cols = colHit.indices.filter { Double(colHit[$0]) > Double(dh) * 0.8 }, rows = rowHit.indices.filter { Double(rowHit[$0]) > Double(dw) * 0.8 }
-guard let x0 = cols.first, let x1 = cols.last, let y0 = rows.first, let y1 = rows.last else { fatalError("no rug found") }
+/// Rows and columns where at least `share` of the span between lo and hi isn't backdrop.
+func span(_ lo: (Int, Int), _ hi: (Int, Int), _ share: Double) -> (x: ClosedRange<Int>, y: ClosedRange<Int>)? {
+    var colHit = [Int](repeating: 0, count: dw), rowHit = [Int](repeating: 0, count: dh)
+    for y in lo.1...hi.1 { for x in lo.0...hi.0 where far(p(x, y)) { colHit[x] += 1; rowHit[y] += 1 } }
+    let h = Double(hi.1 - lo.1 + 1), w = Double(hi.0 - lo.0 + 1)
+    let cols = colHit.indices.filter { Double(colHit[$0]) > h * share }, rows = rowHit.indices.filter { Double(rowHit[$0]) > w * share }
+    guard let x0 = cols.first, let x1 = cols.last, let y0 = rows.first, let y1 = rows.last else { return nil }
+    return (x0...x1, y0...y1)
+}
+// First the rough box, measured against the whole photo. Then again against the rug's own width and
+// height: 80% of the rug, so a worn row still counts but a row of fringe strands, with backdrop
+// showing between them, does not (Underrug draws its own fringe).
+guard let rough = span((0, 0), (dw - 1, dh - 1), 0.5),
+      let fine = span((rough.x.lowerBound, rough.y.lowerBound), (rough.x.upperBound, rough.y.upperBound), 0.8) else { fatalError("no rug found") }
+let x0 = fine.x.lowerBound, x1 = fine.x.upperBound, y0 = fine.y.lowerBound, y1 = fine.y.upperBound
 let s = Double(src.width) / Double(dw)
 // trim a hair more so no background sliver survives
 let inset = 0.012
@@ -39,4 +48,4 @@ if rotate { octx.translateBy(x: CGFloat(W), y: 0); octx.rotate(by: .pi / 2); oct
 else { octx.draw(cut, in: CGRect(x: 0, y: 0, width: W, height: H)) }
 let rep = NSBitmapImageRep(cgImage: octx.makeImage()!)
 try! rep.representation(using: .jpeg, properties: [.compressionFactor: 0.78])!.write(to: URL(fileURLWithPath: a[2]))
-print(a[2], W, "x", H, "from", Int(r.width), "x", Int(r.height))
+print(a[2], W, "x", H, "aspect", String(format: "%.2f", Double(W) / Double(H)))

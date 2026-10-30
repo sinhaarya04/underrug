@@ -4,12 +4,12 @@ import AppKit
 /// (Open Access, CC0). Each photo is cropped to the woven field and turned landscape, so the warp
 /// ends, where the fringe goes, are on the left and right. Sources are in CREDITS.md.
 enum Pattern: String, CaseIterable {
-    case anatolianRed, starMedallions, cairoMedallion, chineseGold, cairoGarden, anatolianGold, ivoryField, prayerRug, custom
+    case anatolianRed, persianMedallion, cairoMedallion, chineseGold, cairoGarden, anatolianGold, ivoryField, prayerRug, custom
 
     var title: String {
         switch self {
         case .anatolianRed: return "Anatolian Red"
-        case .starMedallions: return "Star Medallions"
+        case .persianMedallion: return "Persian Medallion"
         case .cairoMedallion: return "Cairo Medallion"
         case .chineseGold: return "Chinese Gold"
         case .cairoGarden: return "Cairo Garden"
@@ -24,7 +24,7 @@ enum Pattern: String, CaseIterable {
     var origin: String {
         switch self {
         case .anatolianRed: return "Turkey, 18th century"
-        case .starMedallions: return "Turkey, late 18th–early 19th century"
+        case .persianMedallion: return "Iran, second half 16th century"
         case .cairoMedallion: return "Egypt, ca. 1550"
         case .chineseGold: return "China, late 18th–19th century"
         case .cairoGarden: return "Egypt, 17th century"
@@ -39,7 +39,7 @@ enum Pattern: String, CaseIterable {
     var metID: Int? {
         switch self {
         case .anatolianRed: return 452567
-        case .starMedallions: return 452581
+        case .persianMedallion: return 446954
         case .cairoMedallion: return 452309
         case .chineseGold: return 42748
         case .cairoGarden: return 446957

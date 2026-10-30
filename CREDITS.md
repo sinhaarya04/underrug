@@ -7,7 +7,7 @@ public domain (CC0). They were cropped to the woven field, turned landscape and 
 | Design | Object | Origin | Met |
 |---|---|---|---|
 | Anatolian Red | Carpet | Turkey, 18th century | [452567](https://www.metmuseum.org/art/collection/search/452567) |
-| Star Medallions | Carpet | Turkey, late 18th–early 19th century | [452581](https://www.metmuseum.org/art/collection/search/452581) |
+| Persian Medallion | Carpet | Iran, second half 16th century | [446954](https://www.metmuseum.org/art/collection/search/446954) |
 | Cairo Medallion | Carpet | Egypt, ca. 1550 | [452309](https://www.metmuseum.org/art/collection/search/452309) |
 | Chinese Gold | Carpet | China, late 18th–19th century | [42748](https://www.metmuseum.org/art/collection/search/42748) |
 | Cairo Garden | Carpet | Egypt, 17th century | [446957](https://www.metmuseum.org/art/collection/search/446957) |
