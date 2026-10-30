@@ -20,7 +20,7 @@
 <p align="center">
   <img alt="Sweeping 93 desktop icons under the rug, switching rug designs, peeling a corner back to show the heap, and putting the icons back" src="./docs/demo.gif">
   <br />
-  <sub>File names are blurred. <a href="./docs/demo.mp4">Watch at full speed (MP4)</a>.</sub>
+  <sub><a href="./docs/demo.mp4">Watch at full speed (MP4)</a></sub>
 </p>
 
 ## 🌟 Features
