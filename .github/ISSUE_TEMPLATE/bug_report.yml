@@ -1,0 +1,55 @@
+name: Bug report
+description: Something about the rug isn't working right
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this! Please search [existing issues](https://github.com/sinhaarya04/underrug/issues) first.
+        Found a security problem? Report it privately instead: see [SECURITY.md](https://github.com/sinhaarya04/underrug/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: I swept my desktop and some icons stayed where they were…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Choose Size ▸ Large
+        2. Drop three icons on the rug
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Underrug version
+      description: From the release you downloaded, or the commit you built.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 26.1 on an M3 MacBook Air
+    validations:
+      required: true
+  - type: checkboxes
+    id: finder
+    attributes:
+      label: Finder settings (these affect sweeping)
+      options:
+        - label: Desktop "Sort By" is set to something other than None
+        - label: "Use Stacks" is on
+        - label: Underrug is allowed to control Finder (System Settings ▸ Privacy & Security ▸ Automation)
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots or a screen recording
+      description: Very helpful for anything visual. Mind what's visible on your desktop before attaching.

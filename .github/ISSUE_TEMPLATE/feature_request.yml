@@ -1,0 +1,20 @@
+name: Feature request
+description: An idea for Underrug, or a rug you'd like added
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like?
+      description: Describe the idea, or the problem it solves.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+  - type: input
+    id: rug
+    attributes:
+      label: Suggesting a rug design?
+      description: Link to a public-domain photo (e.g. a Met Open Access object page). See CONTRIBUTING.md for what makes a good one.

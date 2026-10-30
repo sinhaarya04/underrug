@@ -1,0 +1,32 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and render
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: ./build.sh
+      - name: Check it's universal
+        run: lipo -info build/Underrug.app/Contents/MacOS/Underrug | grep -q "x86_64 arm64"
+      - name: Render snapshots
+        run: |
+          mkdir -p snapshots
+          APP=build/Underrug.app/Contents/MacOS/Underrug
+          $APP --snapshot snapshots/controls.png --controls
+          $APP --snapshot snapshots/fold.png --fold
+          $APP --snapshot snapshots/lifted.png --lifted
+          $APP --snapshot snapshots/peek.png --peek
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshots
+          path: snapshots/
